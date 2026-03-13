@@ -24,6 +24,10 @@ if (-not (Test-Path $ffmpegPath)) {
     }
 }
 
+# Supprimer le Mark of the Web (fichier telecharge depuis internet) pour
+# eviter le blocage SmartScreen lors de l'execution de ffmpeg.exe
+Unblock-File -Path $ffmpegPath -ErrorAction SilentlyContinue
+
 if (-not (Test-Path $ffmpegPath)) {
     [System.Windows.Forms.MessageBox]::Show(
         "ffmpeg.exe introuvable !`n`nDecompressez l'archive FFmpeg dans ce dossier :`n$scriptDir`n`nConsultez le README.txt pour savoir comment obtenir FFmpeg.",
@@ -39,7 +43,7 @@ if (-not (Test-Path $ffmpegPath)) {
 # -----------------------------------------------------------------------------
 $form                  = New-Object System.Windows.Forms.Form
 $form.Text             = "Audio Extractor (MP4 -> MP3)"
-$form.Size             = New-Object System.Drawing.Size(520, 230)
+$form.Size             = New-Object System.Drawing.Size(520, 285)
 $form.StartPosition    = "CenterScreen"
 $form.FormBorderStyle  = "FixedSingle"
 $form.MaximizeBox      = $false
@@ -49,7 +53,7 @@ $form.Font             = New-Object System.Drawing.Font("Segoe UI", 9)
 # Label d'instruction
 # -----------------------------------------------------------------------------
 $labelInstruction          = New-Object System.Windows.Forms.Label
-$labelInstruction.Text     = "Selectionnez un fichier MP4 ou M4A a convertir en MP3 :"
+$labelInstruction.Text     = "Selectionnez un ou plusieurs fichiers MP4/M4A (Ctrl+clic pour multi-selection) :"
 $labelInstruction.Location = New-Object System.Drawing.Point(12, 15)
 $labelInstruction.Size     = New-Object System.Drawing.Size(490, 20)
 $form.Controls.Add($labelInstruction)
@@ -75,11 +79,36 @@ $buttonSelect.Size     = New-Object System.Drawing.Size(110, 28)
 $form.Controls.Add($buttonSelect)
 
 # -----------------------------------------------------------------------------
+# Label "Dossier de destination"
+# -----------------------------------------------------------------------------
+$labelDest          = New-Object System.Windows.Forms.Label
+$labelDest.Text     = "Dossier de destination :"
+$labelDest.Location = New-Object System.Drawing.Point(12, 75)
+$labelDest.Size     = New-Object System.Drawing.Size(490, 18)
+$form.Controls.Add($labelDest)
+
+# TextBox affichant le dossier de destination choisi
+$textBoxDest           = New-Object System.Windows.Forms.TextBox
+$textBoxDest.Location  = New-Object System.Drawing.Point(12, 95)
+$textBoxDest.Size      = New-Object System.Drawing.Size(370, 24)
+$textBoxDest.ReadOnly  = $true
+$textBoxDest.Text      = "(meme dossier que le fichier source)"
+$textBoxDest.BackColor = [System.Drawing.Color]::WhiteSmoke
+$form.Controls.Add($textBoxDest)
+
+# Bouton "Parcourir..." pour choisir le dossier de destination
+$buttonBrowseDest          = New-Object System.Windows.Forms.Button
+$buttonBrowseDest.Text     = "Parcourir..."
+$buttonBrowseDest.Location = New-Object System.Drawing.Point(392, 93)
+$buttonBrowseDest.Size     = New-Object System.Drawing.Size(110, 28)
+$form.Controls.Add($buttonBrowseDest)
+
+# -----------------------------------------------------------------------------
 # Bouton "Convertir en MP3"
 # -----------------------------------------------------------------------------
 $buttonConvert           = New-Object System.Windows.Forms.Button
 $buttonConvert.Text      = "Convertir en MP3"
-$buttonConvert.Location  = New-Object System.Drawing.Point(12, 85)
+$buttonConvert.Location  = New-Object System.Drawing.Point(12, 140)
 $buttonConvert.Size      = New-Object System.Drawing.Size(490, 36)
 $buttonConvert.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
 $buttonConvert.ForeColor = [System.Drawing.Color]::White
@@ -92,37 +121,68 @@ $form.Controls.Add($buttonConvert)
 # -----------------------------------------------------------------------------
 $labelStatus           = New-Object System.Windows.Forms.Label
 $labelStatus.Text      = "Pret"
-$labelStatus.Location  = New-Object System.Drawing.Point(12, 140)
+$labelStatus.Location  = New-Object System.Drawing.Point(12, 195)
 $labelStatus.Size      = New-Object System.Drawing.Size(490, 20)
 $labelStatus.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($labelStatus)
 
 $separator             = New-Object System.Windows.Forms.Label
 $separator.Text        = ""
-$separator.Location    = New-Object System.Drawing.Point(0, 132)
+$separator.Location    = New-Object System.Drawing.Point(0, 187)
 $separator.Size        = New-Object System.Drawing.Size(520, 2)
 $separator.BorderStyle = "Fixed3D"
 $form.Controls.Add($separator)
 
 # -----------------------------------------------------------------------------
-# Variable pour stocker le chemin du fichier selectionne
+# Variables pour stocker les chemins selectionnes
 # -----------------------------------------------------------------------------
-$selectedFilePath = ""
+$selectedFiles  = @()   # tableau de fichiers (selection simple ou multiple)
+$destinationDir = ""
 
 # -----------------------------------------------------------------------------
 # Evenement : clic sur "Selectionner un fichier"
 # -----------------------------------------------------------------------------
 $buttonSelect.Add_Click({
     $openDialog                  = New-Object System.Windows.Forms.OpenFileDialog
-    $openDialog.Title            = "Selectionner un fichier audio/video"
+    $openDialog.Title            = "Selectionner un ou plusieurs fichiers audio/video"
     $openDialog.Filter           = "Fichiers audio/video (*.mp4;*.m4a)|*.mp4;*.m4a|Tous les fichiers (*.*)|*.*"
     $openDialog.InitialDirectory = [System.Environment]::GetFolderPath("MyVideos")
+    $openDialog.Multiselect      = $true
 
     if ($openDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $script:selectedFilePath = $openDialog.FileName
-        $textBoxFile.Text        = $script:selectedFilePath
-        $labelStatus.Text        = "Pret - Fichier selectionne"
-        $labelStatus.ForeColor   = [System.Drawing.Color]::DimGray
+        $script:selectedFiles = $openDialog.FileNames
+
+        # Affichage dans la TextBox
+        if ($script:selectedFiles.Count -eq 1) {
+            $textBoxFile.Text = $script:selectedFiles[0]
+        } else {
+            $textBoxFile.Text = "$($script:selectedFiles.Count) fichiers selectionnes"
+        }
+
+        # Pre-remplir le dossier de destination avec le dossier du premier fichier
+        if ([string]::IsNullOrEmpty($script:destinationDir)) {
+            $script:destinationDir = Split-Path -Parent $script:selectedFiles[0]
+            $textBoxDest.Text      = $script:destinationDir
+        }
+
+        $labelStatus.Text      = "Pret - $($script:selectedFiles.Count) fichier(s) selectionne(s)"
+        $labelStatus.ForeColor = [System.Drawing.Color]::DimGray
+    }
+})
+
+# -----------------------------------------------------------------------------
+# Evenement : clic sur "Parcourir..." (dossier de destination)
+# -----------------------------------------------------------------------------
+$buttonBrowseDest.Add_Click({
+    $folderDialog                       = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description           = "Choisissez le dossier de destination pour le fichier MP3"
+    $folderDialog.ShowNewFolderButton   = $true
+    if (-not [string]::IsNullOrEmpty($script:destinationDir)) {
+        $folderDialog.SelectedPath = $script:destinationDir
+    }
+    if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $script:destinationDir = $folderDialog.SelectedPath
+        $textBoxDest.Text      = $script:destinationDir
     }
 })
 
@@ -131,9 +191,10 @@ $buttonSelect.Add_Click({
 # -----------------------------------------------------------------------------
 $buttonConvert.Add_Click({
 
-    if ([string]::IsNullOrEmpty($script:selectedFilePath)) {
+    # --- Verification : au moins un fichier doit etre selectionne ---
+    if ($script:selectedFiles.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Veuillez d'abord selectionner un fichier MP4 ou M4A.",
+            "Veuillez d'abord selectionner un ou plusieurs fichiers MP4 ou M4A.",
             "Aucun fichier selectionne",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning
@@ -141,74 +202,82 @@ $buttonConvert.Add_Click({
         return
     }
 
-    if (-not (Test-Path $script:selectedFilePath)) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Le fichier source est introuvable :`n$($script:selectedFilePath)",
-            "Fichier introuvable",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error
-        ) | Out-Null
-        return
+    # --- Dossier de destination par defaut = dossier du premier fichier ---
+    if ([string]::IsNullOrEmpty($script:destinationDir)) {
+        $script:destinationDir = Split-Path -Parent $script:selectedFiles[0]
+        $textBoxDest.Text      = $script:destinationDir
     }
 
-    $outputPath = [System.IO.Path]::ChangeExtension($script:selectedFilePath, ".mp3")
+    # --- Desactivation des boutons pendant la conversion ---
+    $buttonConvert.Enabled      = $false
+    $buttonSelect.Enabled       = $false
+    $buttonBrowseDest.Enabled   = $false
 
-    if (Test-Path $outputPath) {
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Le fichier de sortie existe deja :`n$outputPath`n`nVoulez-vous le remplacer ?",
-            "Fichier existant",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
-            return
-        }
-    }
-
-    $labelStatus.Text      = "Conversion en cours..."
-    $labelStatus.ForeColor = [System.Drawing.Color]::DarkOrange
-    $buttonConvert.Enabled = $false
-    $buttonSelect.Enabled  = $false
-    $form.Refresh()
+    $total   = $script:selectedFiles.Count
+    $success = 0
+    $errList = @()
 
     try {
-        $ffmpegArgs = "-y -i `"$($script:selectedFilePath)`" -q:a 0 -map a `"$outputPath`""
+        for ($i = 0; $i -lt $total; $i++) {
+            $file     = $script:selectedFiles[$i]
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($file)
+            $shortName = [System.IO.Path]::GetFileName($file)
 
-        $process = Start-Process `
-            -FilePath     $ffmpegPath `
-            -ArgumentList $ffmpegArgs `
-            -Wait `
-            -PassThru `
-            -WindowStyle Hidden
+            # Mise a jour du statut
+            $labelStatus.Text      = "Conversion $($i + 1)/$total : $shortName"
+            $labelStatus.ForeColor = [System.Drawing.Color]::DarkOrange
+            $form.Refresh()
 
-        if ($process.ExitCode -eq 0) {
-            $outName               = [System.IO.Path]::GetFileName($outputPath)
-            $labelStatus.Text      = "Termine ! -> $outName"
+            # Verification que le fichier source existe toujours
+            if (-not (Test-Path $file)) {
+                $errList += "$shortName (introuvable)"
+                continue
+            }
+
+            $outputPath = Join-Path $script:destinationDir "$baseName.mp3"
+            $ffmpegArgs = "-y -i `"$file`" -q:a 0 -map a `"$outputPath`""
+
+            $process = Start-Process `
+                -FilePath     $ffmpegPath `
+                -ArgumentList $ffmpegArgs `
+                -Wait `
+                -PassThru `
+                -WindowStyle Hidden
+
+            if ($process.ExitCode -eq 0) {
+                $success++
+            }
+            else {
+                $errList += "$shortName (erreur FFmpeg code $($process.ExitCode))"
+            }
+        }
+
+        # --- Message de fin ---
+        if ($errList.Count -eq 0) {
+            $labelStatus.Text      = "Termine ! $success/$total fichier(s) converti(s)"
             $labelStatus.ForeColor = [System.Drawing.Color]::DarkGreen
-
             [System.Windows.Forms.MessageBox]::Show(
-                "Conversion terminee avec succes !`n`nFichier cree :`n$outputPath",
+                "$success fichier(s) converti(s) avec succes !`n`nDestination : $($script:destinationDir)",
                 "Succes",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
         }
         else {
-            $labelStatus.Text      = "Erreur de conversion (code $($process.ExitCode))"
-            $labelStatus.ForeColor = [System.Drawing.Color]::Red
-
+            $labelStatus.Text      = "$success/$total converti(s) - $($errList.Count) erreur(s)"
+            $labelStatus.ForeColor = [System.Drawing.Color]::DarkOrange
+            $errMsg = ($errList -join "`n")
             [System.Windows.Forms.MessageBox]::Show(
-                "FFmpeg a retourne une erreur (code $($process.ExitCode)).`n`nVerifiez que le fichier source est un MP4 ou M4A valide.",
-                "Erreur de conversion",
+                "$success/$total fichier(s) converti(s).`n`nEchecs :`n$errMsg",
+                "Conversion partielle",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Error
+                [System.Windows.Forms.MessageBoxIcon]::Warning
             ) | Out-Null
         }
     }
     catch {
         $labelStatus.Text      = "Erreur inattendue"
         $labelStatus.ForeColor = [System.Drawing.Color]::Red
-
         [System.Windows.Forms.MessageBox]::Show(
             "Une erreur inattendue s'est produite :`n$($_.Exception.Message)",
             "Erreur",
@@ -217,8 +286,9 @@ $buttonConvert.Add_Click({
         ) | Out-Null
     }
     finally {
-        $buttonConvert.Enabled = $true
-        $buttonSelect.Enabled  = $true
+        $buttonConvert.Enabled    = $true
+        $buttonSelect.Enabled     = $true
+        $buttonBrowseDest.Enabled = $true
     }
 })
 
