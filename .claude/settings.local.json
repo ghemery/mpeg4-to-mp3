@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe -ExecutionPolicy Bypass -NoProfile -File \"audio-extractor.ps1\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -NoProfile -Command \"& { $null = [System.Management.Automation.Language.Parser]::ParseFile\\(''c:\\\\laragon\\\\www\\\\mpeg4-to-mp3\\\\audio-extractor-portable\\\\audio-extractor.ps1'', [ref]$null, [ref]$errors\\); if \\($errors.Count -eq 0\\) { ''OK - aucune erreur de syntaxe'' } else { $errors } }\")"
+    ]
+  }
+}
